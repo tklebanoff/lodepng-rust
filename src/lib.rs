@@ -103,13 +103,17 @@ impl ColorMode {
 
     pub fn palette(&self) -> &[RGBA] {
         unsafe {
-            std::slice::from_raw_parts(self.palette, self.palettesize)
+            slice_from_ptr(self.palette, self.palettesize)
         }
     }
 
     pub fn palette_mut(&mut self) -> &mut [RGBA] {
-        unsafe {
-            std::slice::from_raw_parts_mut(self.palette as *mut _, self.palettesize)
+        if self.palette.is_null() {
+            &mut []
+        } else {
+            unsafe {
+                std::slice::from_raw_parts_mut(self.palette as *mut _, self.palettesize)
+            }
         }
     }
 
@@ -234,12 +238,10 @@ impl Default for ColorMode {
 impl ColorType {
     /// Create color mode with given type and bitdepth
     pub fn to_color_mode(&self, bitdepth: c_uint) -> ColorMode {
-        unsafe {
-            ColorMode {
-                colortype: *self,
-                bitdepth,
-                ..mem::zeroed()
-            }
+        ColorMode {
+            colortype: *self,
+            bitdepth,
+            ..ColorMode::default()
         }
     }
 
@@ -351,7 +353,7 @@ impl Info {
     pub fn append_chunk(&mut self, position: ChunkPosition, chunk: ChunkRef<'_>) -> Result<(), Error> {
         let set = position as usize;
         unsafe {
-            let mut tmp = slice::from_raw_parts_mut(self.unknown_chunks_data[set], self.unknown_chunks_size[set]).to_owned();
+            let mut tmp = slice_from_ptr(self.unknown_chunks_data[set], self.unknown_chunks_size[set]).to_owned();
             chunk_append(&mut tmp, chunk.data);
             let (data, size) = vec_into_raw(tmp)?;
             self.unknown_chunks_data[set] = data;
@@ -386,7 +388,7 @@ impl Info {
 
     pub fn unknown_chunks(&self, position: ChunkPosition) -> ChunksIter<'_> {
         ChunksIter::new(unsafe {
-                slice::from_raw_parts(
+                slice_from_ptr(
                     self.unknown_chunks_data[position as usize],
                     self.unknown_chunks_size[position as usize])
         })
@@ -475,9 +477,6 @@ impl Encoder {
     }
 
     /// Compress using another zlib implementation. It's gzip header + deflate + adler32 checksum.
-    ///
-    /// The callback returns 0 on success.
-    /// The callback MUST allocate memory using `libc::malloc`
     #[inline]
     #[allow(deprecated)]
     pub unsafe fn set_custom_zlib(&mut self, callback: ffi::custom_compress_callback, context: *const c_void) {
@@ -485,9 +484,6 @@ impl Encoder {
     }
 
     /// Compress using another deflate implementation. It's just deflate, without headers or checksum.
-    ///
-    /// The callback returns 0 on success.
-    /// The callback MUST allocate memory using `libc::malloc`
     #[inline]
     #[allow(deprecated)]
     pub unsafe fn set_custom_deflate(&mut self, callback: ffi::custom_compress_callback, context: *const c_void) {
@@ -725,7 +721,7 @@ impl State {
     /// Load PNG from buffer using State's settings
     ///
     ///  ```no_run
-    ///  # use lodepng::*; let mut state = State::new();
+    ///  # use lodepng::*; let mut state = Decoder::new();
     ///  # let slice = [0u8]; #[allow(unused_variables)] fn do_stuff<T>(_buf: T) {}
     ///
     ///  state.info_raw_mut().colortype = ColorType::RGBA;
@@ -852,7 +848,7 @@ fn required_size(w: usize, h: usize, colortype: ColorType, bitdepth: u32) -> usi
 }
 
 unsafe fn vec_from_malloced<T>(ptr: *mut T, elts: usize) -> Vec<T> where T: Copy {
-    let v = Vec::from(std::slice::from_raw_parts(ptr, elts));
+    let v = Vec::from(slice_from_ptr(ptr, elts));
     libc::free(ptr as *mut _);
     v
 }
@@ -974,7 +970,7 @@ fn buffer_for_type<PixelType: rgb::Pod>(image: &[PixelType], w: usize, h: usize,
     }
 
     unsafe {
-        Ok(slice::from_raw_parts(image.as_ptr() as *const _, image_bytes))
+        Ok(slice::from_raw_parts(image.as_ptr() as *const u8, image_bytes))
     }
 }
 
@@ -1053,6 +1049,7 @@ pub struct ChunkRef<'a> {
 impl<'a> ChunkRef<'a> {
     #[inline]
     pub(crate) unsafe fn from_ptr(data: *const u8) -> Result<Self, Error> {
+        debug_assert!(!data.is_null());
         let head = std::slice::from_raw_parts(data, 4);
         let len = lodepng_chunk_length(head);
         let chunk = std::slice::from_raw_parts(data, len + 12);
@@ -1257,6 +1254,14 @@ impl Default for EncoderSettings {
             add_id: 0,
             text_compression: 1,
         }
+    }
+}
+
+unsafe fn slice_from_ptr<'a, T: 'a>(ptr: *const T, len: usize) -> &'a [T] {
+    if ptr.is_null() || len == 0 {
+        &[]
+    } else {
+        std::slice::from_raw_parts(ptr, len)
     }
 }
 
