@@ -369,7 +369,7 @@ pub struct EncoderSettings {
     /// the same length as the amount of scanlines in the image, and each value must <= 5. You
     /// have to cleanup this buffer, LodePNG will never free it. Don't forget that filter_palette_zero
     /// must be set to 0 to ensure this is also used on palette or low bitdepth images
-    pub(crate) predefined_filters: *const u8,
+    pub predefined_filters: *const u8,
 
     /// force creating a `PLTE` chunk if colortype is 2 or 6 (= a suggested palette).
     /// If colortype is 3, `PLTE` is _always_ created
